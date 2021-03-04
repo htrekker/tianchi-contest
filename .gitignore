@@ -1,0 +1,6 @@
+params/*
+log/*
+*.zip
+word_embeddings
+__pycache__
+.vscode
