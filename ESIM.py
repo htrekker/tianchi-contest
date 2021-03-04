@@ -13,10 +13,12 @@ class ESIM(nn.Module):
         self.hidden_size = hidden_size
 
         # load pre-trained word2vec model
-        model = gensim.models.Word2Vec.load('./word_embeddings')
-        weights = torch.FloatTensor(model.wv.vectors)
+        word_vectors = gensim.models.KeyedVectors.load_word2vec_format('./word_embeddings.kv')
+
+        weights = torch.FloatTensor(word_vectors.wv.vectors)
         self.emb_size = weights.size(1)
         self.embeds = nn.Embedding.from_pretrained(weights)
+        print(self.embeds)
         self.bn_embeds = nn.BatchNorm1d(self.emb_size)
 
         self.lstm1 = nn.LSTM(self.emb_size, self.hidden_size,
@@ -24,7 +26,8 @@ class ESIM(nn.Module):
         self.lstm2 = nn.LSTM(self.hidden_size*8, self.hidden_size,
                              batch_first=True, bidirectional=True)
 
-        print('[Model] Model parameters: \n\t Hidden_size: %d, Embeding size: %d, Dropout rate: %.3f.' % (
+        print('[Model] Model parameters: \n\t\
+        Hidden_size: %d, Embeding size: %d, Dropout rate: %.3f.' % (
             self.hidden_size, self.emb_size, self.dropout))
 
         self.fc = nn.Sequential(
@@ -81,10 +84,19 @@ class ESIM(nn.Module):
         # mask1, mask2 = sent1.eq(0), sent2.eq(0)
 
         # embeds: batch_size * seq_len => batch_size * seq_len * dim
-        x1 = self.bn_embeds(self.embeds(sent1).transpose(
-            1, 2).contiguous()).transpose(1, 2)
-        x2 = self.bn_embeds(self.embeds(sent2).transpose(
-            1, 2).contiguous()).transpose(1, 2)
+        try:
+            x1 = self.bn_embeds(
+                self.embeds(sent1).transpose(
+                    1, 2).contiguous()).transpose(1, 2)
+        except IndexError:
+            print(sent1)
+        try:
+            x2 = self.bn_embeds(
+                self.embeds(sent2).transpose(
+                    1, 2).contiguous()).transpose(1, 2)
+        except IndexError:
+            print(sent2)
+            return
 
         # batch_size * seq_len * emb_size => batch_size * seq_len * hidden_size
         o1, _ = self.lstm1(x1)

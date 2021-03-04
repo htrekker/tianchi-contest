@@ -4,3 +4,4 @@ log/*
 word_embeddings
 __pycache__
 .vscode
+*.xlsx

@@ -1,8 +1,7 @@
-
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from sklearn.model_selection import KFold
-from sklearn.metrics import accuracy_score
+# from sklearn.metrics import accuracy_score
 from sklearn import metrics
 
 # from model import ESIM, BiLSTM, Attention, InferenceCompestion
@@ -21,7 +20,7 @@ def parse_arg():
     parser.add_argument('--emb_size', type=int, default=50)
     parser.add_argument('--batch_size', type=int, nargs='?', default=128,
                         help='default is 128')
-    parser.add_argument('--lr', type=float, nargs='?', default=1e-3,
+    parser.add_argument('--lr', type=float, nargs='?', default=1e-2,
                         help='optimizer\'s learning rate (default is 0.01)')
     parser.add_argument('--momentum', type=float, default=0.9,
                         help='optimizer\'s momentum (default 0.9)')
@@ -61,7 +60,7 @@ if __name__ == "__main__":
     now = datetime.strftime(datetime.now(), format='%m-%d-%H-%M')
 
     k_folds = 5
-    kfold = KFold(n_splits=k_folds, shuffle=True)
+    kfold = KFold(n_splits=k_folds)
     for fold, (train_ids, test_ids) in enumerate(kfold.split(dataset)):
         print('[Trainer] Start training fold: %d' % fold)
         train_sampler = torch.utils.data.SubsetRandomSampler(train_ids)
@@ -76,8 +75,9 @@ if __name__ == "__main__":
         # attention = Attention()
         # compestion = InferenceCompestion(
         #     input_size=50, hidden_size=hidden_size)
-        model = ESIM(linear_size=50, hidden_size=hidden_size)
         # model = ESIM(bilstm, attention, compestion)
+
+        model = ESIM(linear_size=50, hidden_size=hidden_size)
         model = model.to(device=device)
         optimizer = torch.optim.SGD(
             model.parameters(), lr=lr, momentum=momentum)
@@ -87,8 +87,10 @@ if __name__ == "__main__":
         global_step_cnt = 0
         global_test_step = 0
         for epoch in range(epochs):
-            running_loss, running_precision = 0.0, 0.0
-            running_auc = 0.0
+            running_loss, running_auc = 0.0, 0.0
+
+            train_losses, test_losses = [], []
+            train_aucs, test_aucs = [], []
 
             # model training step
             model.train()
@@ -108,31 +110,37 @@ if __name__ == "__main__":
 
                 pred = output.to('cpu').detach()
                 label = label.to('cpu')
-                # acc = accuracy_score(label.max(dim=-1).indices, pred)
-                # acc = accuracy_score(label, pred)
                 # 以下3行全是错的
                 pred = pred.detach().numpy()
                 auc_score = metrics.roc_auc_score(label, pred)
                 running_auc += auc_score
-                # running_precision += acc
 
-                writer.add_scalar('loss/train', scalar_value=loss.item(),
+                writer.add_scalar('fold{}_loss/train'.format(fold), scalar_value=loss.item(),
                                   global_step=global_step_cnt)
-                writer.add_scalar('auc/train', scalar_value=auc_score,
+                writer.add_scalar('fold{}_auc/train'.format(fold), scalar_value=auc_score,
                                   global_step=global_step_cnt)
+                train_losses.append(loss.item())
+                train_aucs.append(auc_score)
 
                 count_num = 200
                 if batch_ids % count_num == count_num - 1:  # print every 2000 iteration
                     print('[Trainer] (Epoch: %d, Iter: %d) Train loss: %.4f, Train auc: %.4f.' %
                           (epoch, batch_ids, running_loss/count_num, running_auc/count_num))
-                    running_loss, running_precision = 0.0, 0.0
-                    running_auc = 0.0
+                    running_loss, running_auc = 0.0, 0.0
+
+            # 每个epoch记得平均loss
+            writer.add_scalar('fold{}_train/loss'.format(fold),
+                              scalar_value=(sum(train_losses)/len(train_losses)), global_step=epoch)
+            writer.add_scalar('fold{}_train/auc'.format(fold),
+                              scalar_value=(sum(train_aucs)/len(train_aucs)), global_step=epoch)
 
             # save model after every epoch
-            file_path = 'params/{time}-fold{num}-epoch{epoch}.pkl'.format(
-                time=now, num=fold, epoch=epoch)
-            torch.save(model.state_dict(), file_path)
-            running_loss, running_precision = 0.0, 0.0
+            if epoch > 3:
+                file_path = 'params/{time}-fold{num}-epoch{epoch}.pkl'.format(
+                    time=now, num=fold, epoch=epoch)
+                torch.save(model.state_dict(), file_path)
+
+            running_loss, running_auc = 0.0, 0.0
 
             # model evaluation step
             model.eval()
@@ -150,18 +158,23 @@ if __name__ == "__main__":
 
                     pred = test_output.to('cpu').detach()
                     label = label.to('cpu')
-                    # acc = accuracy_score(label.max(dim=-1).indices, pred)
-                    # acc = accuracy_score(label, pred)
                     auc_score = metrics.roc_auc_score(label, pred)
 
-                    # running_precision += acc
                     running_auc += auc_score
 
                     running_loss += loss.item()
-                    writer.add_scalar('loss/test', scalar_value=loss.item(),
-                                      global_step=global_test_step)
-                    writer.add_scalar(
-                        'auc/test', scalar_value=auc_score, global_step=global_test_step)
-            #     test_losses.append(running_loss/test_idx)
-            print('Epoch %d: Test loss: %.4f, Auc score: %.4f.' %
-                  (epoch, running_loss/test_counter, running_auc/test_counter))
+                    writer.add_scalar('fold{}_loss/test'.format(fold),
+                                      scalar_value=loss.item(), global_step=global_test_step)
+                    writer.add_scalar('fold{}_auc/test'.format(fold),
+                                      scalar_value=auc_score, global_step=global_test_step)
+                    test_losses.append(loss.item())
+                    test_aucs.append(auc_score)
+
+            writer.add_scalar('fold{}_test/loss'.format(fold),
+                              scalar_value=(sum(test_losses)/len(test_losses)), global_step=epoch)
+            writer.add_scalar('fold{}_test/auc'.format(fold),
+                              scalar_value=(sum(test_aucs)/len(test_aucs)), global_step=epoch)
+
+            print('Epoch %d: Train avg loss: %.4f, Train avg auc: %.4f; Test avg loss: %.4f, Test avg auc: %.4f.' %
+                  (epoch, sum(train_losses)/len(train_losses), sum(train_aucs)/len(train_aucs),
+                   sum(test_losses)/len(test_losses), sum(test_aucs)/len(test_aucs)))
