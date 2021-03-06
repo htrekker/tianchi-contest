@@ -13,7 +13,7 @@ class ValidationDataSet(Dataset):
         self.df = pd.read_csv(file_path, header=None, sep='\t')
         print('[DataSet] Total count: %d.' % len(self.df))
 
-        with open('token2id.json', mode='r') as f:
+        with open('../embeddings/token2id.json', mode='r') as f:
             self.token2id = json.load(f)
 
     def __getitem__(self, index):
@@ -39,13 +39,18 @@ class ValidationDataSet(Dataset):
 
 class TestDataSet(Dataset):
 
-    def __init__(self, file_path, device):
+    def __init__(self, file_path, device, emb_type='word2vec'):
         print('[DataSet] Loading data from %s.' % file_path)
         self.df = pd.read_csv(file_path, header=None, sep='\t')
         print('[DataSet] Total count: %d.' % len(self.df))
         self.device = device
 
-        with open('token2id.json', mode='r') as f:
+        if emb_type == 'word2vec':
+            self.path = '../embeddings/word2vec_vectors.kv'
+        elif emb_type == 'glove':
+            self.path = '../embeddings/glove_vectors.txt'
+
+        with open(self.path, mode='r') as f:
             self.token2id = json.load(f)
 
     def __getitem__(self, index):
@@ -53,13 +58,19 @@ class TestDataSet(Dataset):
 
         x = []
         for token in row[0].split():
-            x.append(self.token2id[token])
+            if token in self.token2id:
+                x.append(self.token2id[token])
+            else:
+                x.append(self.token2id['<unk>'])
         x = torch.LongTensor(x)
         x = x.to(device=self.device)
 
         y = []
         for token in row[1].split():
-            y.append(self.token2id[token])
+            if token in self.token2id:
+                y.append(self.token2id[token])
+            else:
+                y.append(self.token2id['<unk>'])
         y = torch.LongTensor(y)
         y = y.to(device=self.device)
 

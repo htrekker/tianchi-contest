@@ -13,7 +13,8 @@ class ESIM(nn.Module):
         self.hidden_size = hidden_size
 
         # load pre-trained word2vec model
-        word_vectors = gensim.models.KeyedVectors.load_word2vec_format('./word_embeddings.kv')
+        word_vectors = gensim.models.KeyedVectors.load_word2vec_format(
+            '../embeddings/woed2vec_embeddings.kv')
 
         weights = torch.FloatTensor(word_vectors.wv.vectors)
         self.emb_size = weights.size(1)
@@ -80,40 +81,49 @@ class ESIM(nn.Module):
     def forward(self, *input):
         # batch_size * seq_len
         sent1, sent2 = input[0], input[1]
+        lens1, lens2 = input[2], input[3]
         mask1, mask2 = sent1.eq(0), sent2.eq(0)
         # mask1, mask2 = sent1.eq(0), sent2.eq(0)
 
         # embeds: batch_size * seq_len => batch_size * seq_len * dim
-        try:
-            x1 = self.bn_embeds(
-                self.embeds(sent1).transpose(
-                    1, 2).contiguous()).transpose(1, 2)
-        except IndexError:
-            print(sent1)
-        try:
-            x2 = self.bn_embeds(
-                self.embeds(sent2).transpose(
-                    1, 2).contiguous()).transpose(1, 2)
-        except IndexError:
-            print(sent2)
-            return
+        x1 = self.bn_embeds(self.embeds(sent1).transpose(
+            1, 2).contiguous()).transpose(1, 2)
+        x2 = self.bn_embeds(self.embeds(sent2).transpose(
+            1, 2).contiguous()).transpose(1, 2)
 
         # batch_size * seq_len * emb_size => batch_size * seq_len * hidden_size
+        x1 = nn.utils.rnn.pack_padded_sequence(
+            x1, lens1, batch_first=True, enforce_sorted=False)
+        x2 = nn.utils.rnn.pack_padded_sequence(
+            x2, lens2, batch_first=True, enforce_sorted=False)
         o1, _ = self.lstm1(x1)
         o2, _ = self.lstm1(x2)
+        o1, _ = nn.utils.rnn.pad_packed_sequence(
+            o1, batch_first=True)
+        o2, _ = nn.utils.rnn.pad_packed_sequence(
+            o2, batch_first=True)
 
         # Attention
         # batch_size * seq_len * hidden_size
         q1_align, q2_align = self.soft_attention_align(o1, o2, mask1, mask2)
 
         # Compose
+        # Input: batch_size * seq_len * (2 * hidden_size) x 2
         # batch_size * seq_len * (8 * hidden_size)
         q1_combined = torch.cat([o1, q1_align, self.submul(o1, q1_align)], -1)
         q2_combined = torch.cat([o2, q2_align, self.submul(o2, q2_align)], -1)
 
         # batch_size * seq_len * (2 * hidden_size)
+        q1_combined = nn.utils.rnn.pack_padded_sequence(
+            q1_combined, lens1, batch_first=True, enforce_sorted=False)
+        q2_combined = nn.utils.rnn.pack_padded_sequence(
+            q2_combined, lens2, batch_first=True, enforce_sorted=False)
         q1_compose, _ = self.lstm2(q1_combined)
         q2_compose, _ = self.lstm2(q2_combined)
+        q1_compose, _ = nn.utils.rnn.pad_packed_sequence(
+            q1_compose, batch_first=True)
+        q2_compose, _ = nn.utils.rnn.pad_packed_sequence(
+            q2_compose, batch_first=True)
 
         # Aggregate
         # input: batch_size * seq_len * (2 * hidden_size)

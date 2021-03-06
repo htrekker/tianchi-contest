@@ -18,12 +18,15 @@ def parse_arg():
 
     parser.add_argument('--hidden_size', type=int, default=60)
     parser.add_argument('--emb_size', type=int, default=50)
+    parser.add_argument('--linear_size', type=int, default=50)
     parser.add_argument('--batch_size', type=int, nargs='?', default=128,
                         help='default is 128')
     parser.add_argument('--lr', type=float, nargs='?', default=1e-2,
                         help='optimizer\'s learning rate (default is 0.01)')
     parser.add_argument('--momentum', type=float, default=0.9,
                         help='optimizer\'s momentum (default 0.9)')
+    parser.add_argument('--weight_decay', type=float, default=2e-4,
+                        help='optimizer weight decay')
     parser.add_argument('--epoch', type=int, help='Number of Epoch.')
     parser.add_argument('--cuda', default=-1, type=int, required=False,
                         help='use cuda or not (default no)')
@@ -40,8 +43,10 @@ if __name__ == "__main__":
     epochs = args['epoch']
     lr = args['lr']
     momentum = args['momentum']
+    weight_decay = args['weight_decay']
     hidden_size = args['hidden_size']
     emb_size = args['emb_size']
+    linear_size = args['linear_size']
     print('[Trainer] Trainer hyper-parameters: \n\t \
         batch size: %d, lr: %.4f, momentum: %.4f, epochs: %d.' %
           (batch_size, lr, momentum, epochs))
@@ -52,10 +57,10 @@ if __name__ == "__main__":
         device = torch.device('cuda:0')
     print('[Trainer] Using device: %s.' % device)
 
-    dataset = TestDataSet('data/shuffled_dataset.tsv', device=device)
+    dataset = TestDataSet('../../data/shuffled_dataset.tsv', device=device)
 
     # init summary writer
-    writer = SummaryWriter(log_dir='log')
+    writer = SummaryWriter(log_dir='../log')
 
     now = datetime.strftime(datetime.now(), format='%m-%d-%H-%M')
 
@@ -77,10 +82,12 @@ if __name__ == "__main__":
         #     input_size=50, hidden_size=hidden_size)
         # model = ESIM(bilstm, attention, compestion)
 
-        model = ESIM(linear_size=50, hidden_size=hidden_size)
+        model = ESIM(linear_size=linear_size, hidden_size=hidden_size)
         model = model.to(device=device)
         optimizer = torch.optim.SGD(
-            model.parameters(), lr=lr, momentum=momentum)
+            model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer, step_size=5, gamma=0.1)
         # criterion = torch.nn.CrossEntropyLoss()
         criterion = torch.nn.BCEWithLogitsLoss()
 
@@ -97,10 +104,11 @@ if __name__ == "__main__":
             for batch_ids, batch in enumerate(train_loader):
                 global_step_cnt += 1
                 sent1, sent2 = batch['sentence1'], batch['sentence2']
+                lens1, lens2 = batch['lengths1'], batch['lengths2']
 
                 label = batch['label'].to(device)
                 optimizer.zero_grad()
-                output = model(sent1, sent2)
+                output = model(sent1, sent2, lens1, lens2)
                 output = output.squeeze(-1)
                 loss = criterion(output, label)
                 running_loss += loss.item()
@@ -136,7 +144,7 @@ if __name__ == "__main__":
 
             # save model after every epoch
             if epoch > 3:
-                file_path = 'params/{time}-fold{num}-epoch{epoch}.pkl'.format(
+                file_path = '../params/{time}-fold{num}-epoch{epoch}.pkl'.format(
                     time=now, num=fold, epoch=epoch)
                 torch.save(model.state_dict(), file_path)
 
@@ -150,10 +158,11 @@ if __name__ == "__main__":
                     test_counter += 1
                     global_test_step += 1
                     sent1, sent2 = test['sentence1'], test['sentence2']
+                    lens1, lens2 = test['lengths1'], test['lengths2']
 
                     label = test['label'].to(device)
 
-                    test_output = model(sent1, sent2).squeeze()
+                    test_output = model(sent1, sent2, lens1, lens2).squeeze()
                     loss = criterion(test_output, label)
 
                     pred = test_output.to('cpu').detach()
@@ -169,6 +178,8 @@ if __name__ == "__main__":
                                       scalar_value=auc_score, global_step=global_test_step)
                     test_losses.append(loss.item())
                     test_aucs.append(auc_score)
+
+            scheduler.step()
 
             writer.add_scalar('fold{}_test/loss'.format(fold),
                               scalar_value=(sum(test_losses)/len(test_losses)), global_step=epoch)

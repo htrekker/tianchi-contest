@@ -44,7 +44,7 @@ for i, token in enumerate(token_list):
     if i < 10:
         print(token, i+1)
     token2id[token] = i+1
-
+token2id['0'] = 0
 with open('token2id.json', mode='w') as f:
     json.dump(token2id, fp=f)
 
