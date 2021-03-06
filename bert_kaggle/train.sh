@@ -1,0 +1,36 @@
+# 指定GPU
+# export CUDA_VISIBLE_DEVICES=2
+train_name=$1
+model_dir=chinese_wwm_pytorch/
+data_dir=data/chnsenticorp
+# data_dir=data/afqmc
+
+
+if [ ! "$train_name" ]; then
+    echo "modelname is none"
+    exit 1
+fi
+
+if [ ! -d "$train_name" ]; then
+    mkdir $train_name
+fi
+
+python main.py \
+    --model_type=classification \
+    --task_name=chnsenti \
+    --data_dir=$data_dir \
+    --model_name_or_path=$model_dir \
+    --output_dir=$train_name \
+    --max_seq_length=128 \
+    --do_train \
+    --do_eval \
+    --per_gpu_train_batch_size=32 \
+    --per_gpu_eval_batch_size=256 \
+    --learning_rate=2e-5 \
+    --weight_decay=0.0 \
+    --warmup_steps=0 \
+    --save_steps=500 \
+    --logging_steps=50 \
+    --num_train_epochs=10 \
+    --overwrite_output_dir \
+    --evaluate_during_training
